@@ -7,6 +7,10 @@ import torch.nn.functional as F
 from function.rope.rope_fnc import apply_rotary_pos_emb
 
 class LLaDA_TransformerBlock(nn.Module):
+    """
+    RoPE 적용
+    SwiGLU 적용
+    """
     def __init__(self, config):
         super(LLaDA_TransformerBlock, self).__init__()
         self.hidden_dim = config.hidden_dim
@@ -30,7 +34,7 @@ class LLaDA_TransformerBlock(nn.Module):
                         )
 
     def forward(self, hidden_states, attention_mask, rope_cache=None, offset=0):
-        B, S = hidden_states.size()
+        B, S, d = hidden_states.size()
 
         attn_in = self.rn1(hidden_states)
 
