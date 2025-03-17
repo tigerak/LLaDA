@@ -9,30 +9,30 @@ from function.rope.rope_fnc import apply_rotary_pos_emb
 class LLaDA_TransformerBlock(nn.Module):
     def __init__(self, config):
         super(LLaDA_TransformerBlock, self).__init__()
-        self.hidden_dim = config.hidden_size
+        self.hidden_dim = config.hidden_dim
         self.num_heads = config.num_attention_heads
-        self.head_dim = self.hidden_dim // self.num_heads
+        self.head_dim = config.head_dim
         self.dropout = config.dropout
 
-        self.ln1 = nn.RMSNorm(config.hidden_size, eps=1e-5)
+        self.rn1 = nn.RMSNorm(config.hidden_dim, eps=1e-5)
         
         self.q_peoj = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
         self.k_peoj = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
         self.v_peoj = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
         self.o_peoj = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
 
-        self.ln2 = nn.RMSNorm(config.hidden_size, eps=1e-5)
+        self.rn2 = nn.RMSNorm(config.hidden_dim, eps=1e-5)
 
         self.ffn = nn.Sequential(
-                        nn.Linear(config.hidden_size, config.intermediate_size*2, bias=False),
+                        nn.Linear(config.hidden_dim, config.intermediate_size*2, bias=False),
                         SwiGLU(config.intermediate_size*2, config.intermediate_size),
-                        nn.Linear(config.intermediate_size, config.hidden_size, bias=False) 
+                        nn.Linear(config.intermediate_size, config.hidden_dim, bias=False) 
                         )
 
     def forward(self, hidden_states, attention_mask, rope_cache=None, offset=0):
         B, S = hidden_states.size()
 
-        attn_in = self.ln1(hidden_states)
+        attn_in = self.rn1(hidden_states)
 
         q = self.q_peoj(attn_in)
         k = self.k_peoj(attn_in)
@@ -71,7 +71,7 @@ class LLaDA_TransformerBlock(nn.Module):
 
         residual1 = hidden_states + attn_out 
 
-        ffn_in = self.ln2(residual1)
+        ffn_in = self.rn2(residual1)
         ffn_out = self.ffn(ffn_in)
 
         residual2 = residual1 + ffn_out

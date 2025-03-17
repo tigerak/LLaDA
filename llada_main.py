@@ -7,7 +7,7 @@ from time import time
 import torch
 from torch.utils.data import DataLoader
 # transformers
-from transformers import BertConfig, AutoTokenizer
+from transformers import AutoTokenizer
 # modules
 from config import *
 from function.llada.llada_decoder_block import LladaDecoderBlock
@@ -15,28 +15,39 @@ from function.llada.llada_transfoermer_block import LLaDA_BERT
 from function.llada.llada_dataset import LLaDA_Dataset
 from function.llada.llada_fnc import calculate_loss
 
-if __name__ == "__main__":
-
+class LLaDA_Config:
+    # 모델델
     use_bf16 = True
 
-    bert_config = BertConfig(
-            vocab_size=32000,
-            hidden_size=768, # 2048
-            num_attention_heads=12, # 32
-            dropout=0.1,
-            intermediate_size=3072, # 5634
-            type_vocab_size=1,
-            num_hidden_layers=12, # 22
-        )
-    print(bert_config)
+    vocab_size = 32000,
+    type_vocab_size = 1,
 
+    hidden_dim = 768, # 2048
+    num_attention_heads = 12, # 32
+    head_dim = hidden_dim // num_attention_heads
+    dropout=0.1,
+    
+    intermediate_size=3072, # 5634
+
+    num_hidden_layers=12, # 22
+
+    # 토크나이저
+    max_seq_len = 128
+
+    # 학습
     epochs = 10
     monte_carlo_samples = 10
 
+
+if __name__ == "__main__":
+
+    cfg = LLaDA_Config()
+    print(cfg)
+
     tokenizer = AutoTokenizer.from_pretrained(KO_ROBERTA)
 
-    model = LLaDA_BERT(config=bert_config)
-    if use_bf16:
+    model = LLaDA_BERT(config=cfg)
+    if cfg.use_bf16:
         model = model.to(dtype=torch.bfloat16)
     model.cuda()
 
@@ -49,7 +60,7 @@ if __name__ == "__main__":
                             shuffle=True,
                             collate_fn=dataset.collate_fn)
 
-    for epoch in range(epochs):
+    for epoch in range(cfg.epochs):
         model.train()
         for batch in dataloader:
             start_time = time()
@@ -60,7 +71,7 @@ if __name__ == "__main__":
             t = batch["t"].cuda()
 
             batch_loss = 0
-            for _ in range(monte_carlo_samples):
+            for _ in range(cfg.monte_carlo_samples):
                 logits = model(input_ids=input_ids,
                             attention_mask=attention_mask)
                 loss = calculate_loss(input_ids=input_ids,
