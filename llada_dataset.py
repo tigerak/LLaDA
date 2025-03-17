@@ -43,7 +43,7 @@ class LLaDA_Dataset(Dataset):
         labels = torch.full_like(input_ids, fill_value=-100)  # 처음부터 -100으로 초기화
         labels[mask_indices] = input_ids[mask_indices]  # 마스킹된 부분만 정답으로 사용
         
-        return {"input_ids": input_ids,
+        return {"input_ids": masked_input_ids,
                 "attention_mask": attention_mask,
                 "labels": labels,
                 "t": torch.Tensor(t)}
