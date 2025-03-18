@@ -5,13 +5,16 @@ import torch
 from torch.utils.data import Dataset
 
 class LLaDA_Dataset(Dataset):
-    def __init__(self, json_path, tokenizer):
+    def __init__(self, json_path, tokenizer, config):
 
         with open(json_path, 'r', encoding="utf-8") as file:
             self.llada_data = json.load(file)
 
         self.tokenizer = tokenizer
-        self.tokenizer.pad_token = self.tokenizer.eos_token
+        # (pad -> eos) : 논문 부록 B.1
+        self.tokenizer.pad_token = self.tokenizer.eos_token 
+
+        self.cfg = config
 
     def __len__(self):
         return len(self.llada_data)
@@ -25,7 +28,7 @@ class LLaDA_Dataset(Dataset):
 
         encoding = self.tokenizer(text=prompt_complete, 
                                   truncation=True,
-                                  max_length=128,
+                                  max_length=self.cfg.max_seq_len,
                                   padding="max_length",
                                   add_special_tokens=True,
                                   return_tensors="pt")
@@ -46,7 +49,7 @@ class LLaDA_Dataset(Dataset):
         return {"input_ids": masked_input_ids,
                 "attention_mask": attention_mask,
                 "labels": labels,
-                "t": torch.Tensor(t)}
+                "t": torch.tensor(t)}
     
 @staticmethod
 def collate_fn(batch):
@@ -77,19 +80,19 @@ def mask_tokens_with_random_t(input_ids,
     # 🔹 프롬프트 & 특수 토큰 제외한 마스킹 가능한 토큰 찾기
     valid_tokens = torch.ones(seq_len, dtype=torch.bool)  # 모든 위치를 True로 초기화
     valid_tokens[:prompt_len] = False  # 프롬프트 제외
-    valid_tokens[input_ids == tokenizer.pad_token_id] = False  # 패딩 제외
+    # valid_tokens[input_ids == tokenizer.pad_token_id] = False  # 패딩 제외
     valid_tokens[input_ids == tokenizer.bos_token_id] = False  # BOS 제외
+    # valid_tokens[input_ids == tokenizer.eos_token_id] = False  # EOS 제외
 
     # `t` 확률로 마스킹 여부 결정
     valid_indices = valid_tokens.nonzero(as_tuple=True)[0]  # 마스킹 가능한 인덱스
     num_to_mask = max(1, round(t * valid_indices.shape[0]))  # 최소 1개 이상 마스킹
 
     # num_to_mask 개수만큼 선택하여 마스킹
-    mask_indices = valid_indices[torch.randperm(len(valid_indices))[:num_to_mask]]
+    mask_indices = valid_indices[torch.randperm(valid_indices.size(0))[:num_to_mask]]
 
     # 마스킹 적용
     masked_input_ids = input_ids.clone()
-    masked_input_ids[mask_indices] = tokenizer.mask_token_id  # `[MASK]` 적용
+    masked_input_ids[mask_indices] = tokenizer.mask_token_id  # [MASK] 적용
     
     return masked_input_ids, mask_indices, t
-    

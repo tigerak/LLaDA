@@ -49,7 +49,7 @@ class LLaDA_TransformerBlock(nn.Module):
         if rope_cache is not None:
             q, k = apply_rotary_pos_emb(q=q,
                                         k=k,
-                                        rope_cache=rope_cache,
+                                        cos_sin=rope_cache,
                                         offset=offset)
         q = q.permute(0, 2, 1, 3)
         k = k.permute(0, 2, 1, 3)
@@ -91,4 +91,3 @@ class SwiGLU(nn.Module):
     def forward(self, x):
         return F.silu(self.fc1(x)) * self.fc2(x)
     
-
