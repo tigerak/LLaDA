@@ -13,6 +13,7 @@ from transformers import AutoTokenizer
 from config import *
 from function.llada.llada_dataset import LLaDA_Dataset, collate_fn
 from function.llada.llada_mask_predictor import LLaDA_MaskPredictor
+from function.llada.llada_inference import llada_inference
 
 class LLaDA_Config:
     def __init__(self, tokenizer):
@@ -34,9 +35,11 @@ class LLaDA_Config:
         pad_token_id = tokenizer.eos_token_id 
         eos_token_id = tokenizer.eos_token_id 
         # 학습
-        epochs = 10
+        batch = 32
+        lr = 2e-5
+        epochs = 50
         # 추론론
-        monte_carlo_samples = 10
+        monte_carlo_samples = 64
 
         for key, value in locals().items():
             if key != "self":  # self 제외
@@ -64,19 +67,54 @@ if __name__ == "__main__":
     model = LLaDA_MaskPredictor(config=cfg)
     if cfg.use_bf16:
         model = model.to(dtype=torch.bfloat16)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr)
+
+    ### 기존 학습 모델 불러오기 ###
+    leaning_model_path = save_dir + r'llada/last_model.pt'
+    start_epoch = 0
+    if os.path.exists(leaning_model_path):
+        print(f"기존 학습 모델 로드 시작: {leaning_model_path}")
+        checkpoint = torch.load(leaning_model_path, map_location="cpu")
+        model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = cfg.lr
+            print(f"새로운 학습률 적용: {optimizer.param_groups[0]['lr']}")
+        start_epoch = checkpoint["epoch"] 
+        print(f"모델 로드 완료! {start_epoch}epoch 부터 학습을 재개합니다.")
+    else:
+        print(f"저장된 모델이 없습니다. 새 모델을 학습합니다.")
+
     model.cuda()
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
-
+    # (4) 옵티마이저 state도 GPU로 올림 (float32 유지 or bf16 변환은 상황에 맞게)
+    for param_state in optimizer.state.values():
+        if isinstance(param_state, dict):
+            for k, v in param_state.items():
+                if torch.is_tensor(v):
+                    # 일단 float32 그대로 GPU로만 옮기는 것이 일반적
+                    param_state[k] = v.cuda() # .to(torch.bfloat16)
+    
+    def get_model_size(model):
+        total_params = sum(p.numel() for p in model.parameters())
+        total_memory = total_params * 2 / (1024 ** 2)  # MB 단위 (FP16 기준)
+        print(f"총 파라미터 수: {total_params:,}")
+        print(f"메모리 사용량 (FP16 기준): {total_memory:.2f} MB")
+    get_model_size(model)
+    
+    #### 데이터 불러오기 ###
     dataset = LLaDA_Dataset(json_path=YTN_DATA, 
                             tokenizer=tokenizer,
                             config=cfg)
     dataloader = DataLoader(dataset,
-                            batch_size=2,
+                            batch_size=cfg.batch,
                             shuffle=True,
                             collate_fn=collate_fn)
 
-    for epoch in range(cfg.epochs):
+    ### 학습 시작 ###
+    print(f"에폭 당 스텝:{len(dataloader)}")
+    for epoch in range(start_epoch, cfg.epochs):
         model.train()
         for step, batch in enumerate(dataloader):
             start_time = time()
@@ -88,7 +126,7 @@ if __name__ == "__main__":
 
             batch_loss = 0
             logits, loss = model(input_ids=input_ids,
-                                 attention_mask=attention_mask,
+                                 attention_mask=None,
                                  labels=labels,
                                  t=t)
             
@@ -98,7 +136,36 @@ if __name__ == "__main__":
 
             end_time = time()
 
-            if (step+1) % 10 == 0:
-                print(f"step:{step} / loss:{round(loss.item(), 4)} / time:{end_time-start_time}")
+            if (step+1) % 100 == 0:
+                print(f"step:{step} / epoch:{epoch} / loss:{round(loss.item(), 4)} / time:{round(end_time-start_time, 2)} / t:{round(t.tolist()[0], 2)}")
                 predicted_tokens = torch.argmax(logits[0], dim=-1) 
                 print(tokenizer.decode(predicted_tokens.tolist()))
+
+            # if step == 1:
+            #     break
+
+        ### inference test ##
+        test_title = "### TITLE: 한전, 지난해 영업익 8조 3천억...4년 만에 흑자 전환\n###ARTICLE: "
+        encoding = tokenizer(text=test_title, 
+                            add_special_tokens=False,
+                            return_tensors="pt").to("cuda") 
+        prompt_ids = encoding["input_ids"]
+        llada_inference(cfg=cfg,
+                        model=model,
+                        tokenizer=tokenizer,
+                        prompt_ids=prompt_ids,
+                        num_step=cfg.monte_carlo_samples,
+                        remask_str="low_confidence",
+                        device="cuda")
+        # break
+        
+        # 모델 저장 (epoch마다 저장)
+        model_save_path = os.path.join(save_dir, f"llada/last_model.pt")
+        # model_save_path = os.path.join(save_dir, f"model_epoch_{epoch+1}.pt")
+        torch.save({
+            "epoch": epoch + 1,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+        }, model_save_path)
+        
+        print(f"모델 저장 완료: {model_save_path}")

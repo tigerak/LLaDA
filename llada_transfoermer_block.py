@@ -3,6 +3,8 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+# flash attn
+from flash_attn.modules.mha import FlashSelfAttention
 # module
 from function.rope.rope_fnc import apply_rotary_pos_emb
 
@@ -24,6 +26,9 @@ class LLaDA_TransformerBlock(nn.Module):
         self.k_peoj = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
         self.v_peoj = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
         self.o_peoj = nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
+
+        self.flash_attn = FlashSelfAttention(causal=False,
+                                             attention_dropout=self.dropout)
 
         self.rn2 = nn.RMSNorm(config.hidden_dim, eps=1e-5)
 
@@ -69,6 +74,7 @@ class LLaDA_TransformerBlock(nn.Module):
         attn_out = torch.matmul(attn_props, v) # (B, n_head, S, head_dim)
 
         attn_out = attn_out.permute(0, 2, 1, 3).contiguous() # (B, S, n_head, head_dim)
+       
         attn_out = attn_out.view(B, S, self.hidden_dim) # (B, S, d)
 
         attn_out = self.o_peoj(attn_out)
