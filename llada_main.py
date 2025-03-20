@@ -34,12 +34,13 @@ class LLaDA_Config:
         max_seq_len = 128
         pad_token_id = tokenizer.eos_token_id 
         eos_token_id = tokenizer.eos_token_id 
+        mask_token_id = tokenizer.mask_token_id
         # 학습
         batch = 32
         lr = 2e-5
         epochs = 50
         # 추론론
-        monte_carlo_samples = 64
+        monte_carlo_samples = 32
 
         for key, value in locals().items():
             if key != "self":  # self 제외
@@ -116,48 +117,49 @@ if __name__ == "__main__":
     print(f"에폭 당 스텝:{len(dataloader)}")
     for epoch in range(start_epoch, cfg.epochs):
         model.train()
-        for step, batch in enumerate(dataloader):
-            start_time = time()
+        # for step, batch in enumerate(dataloader):
+        #     start_time = time()
             
-            input_ids = batch["input_ids"].cuda()
-            attention_mask = batch["attention_mask"].cuda()
-            labels = batch["labels"].cuda()
-            t = batch["t"].cuda()
+        #     input_ids = batch["input_ids"].cuda()
+        #     attention_mask = batch["attention_mask"].cuda()
+        #     labels = batch["labels"].cuda()
+        #     t = batch["t"].cuda()
 
-            batch_loss = 0
-            logits, loss = model(input_ids=input_ids,
-                                 attention_mask=None,
-                                 labels=labels,
-                                 t=t)
+        #     batch_loss = 0
+        #     logits, loss = model(input_ids=input_ids,
+        #                          attention_mask=None,
+        #                          labels=labels,
+        #                          t=t)
             
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
+        #     loss.backward()
+        #     optimizer.step()
+        #     optimizer.zero_grad()
 
-            end_time = time()
+        #     end_time = time()
 
-            if (step+1) % 100 == 0:
-                print(f"step:{step} / epoch:{epoch} / loss:{round(loss.item(), 4)} / time:{round(end_time-start_time, 2)} / t:{round(t.tolist()[0], 2)}")
-                predicted_tokens = torch.argmax(logits[0], dim=-1) 
-                print(tokenizer.decode(predicted_tokens.tolist()))
+        #     if (step+1) % 100 == 0:
+        #         print(f"step:{step} / epoch:{epoch} / loss:{round(loss.item(), 4)} / time:{round(end_time-start_time, 2)} / t:{round(t.tolist()[0], 2)}")
+        #         predicted_tokens = torch.argmax(logits[0], dim=-1) 
+        #         print(tokenizer.decode(predicted_tokens.tolist()))
 
-            # if step == 1:
-            #     break
+        #     # if step == 1:
+        #     #     break
 
         ### inference test ##
-        test_title = "### TITLE: 한전, 지난해 영업익 8조 3천억...4년 만에 흑자 전환\n###ARTICLE: "
+        # test_title = "### TITLE: 한전, 지난해 영업익 8조 3천억...4년 만에 흑자 전환\n###ARTICLE: "
+        test_title = "### TITLE: 작년 역대급 실적 SK하이닉스, 차입금 6조7천 억 상환\n###ARTICLE: "
         encoding = tokenizer(text=test_title, 
                             add_special_tokens=False,
                             return_tensors="pt").to("cuda") 
         prompt_ids = encoding["input_ids"]
-        llada_inference(cfg=cfg,
-                        model=model,
-                        tokenizer=tokenizer,
-                        prompt_ids=prompt_ids,
-                        num_step=cfg.monte_carlo_samples,
-                        remask_str="low_confidence",
-                        device="cuda")
-        # break
+        output = llada_inference(cfg=cfg,
+                                 model=model,
+                                 prompt_ids=prompt_ids,
+                                 num_step=cfg.monte_carlo_samples,
+                                 remask_str="low_confidence",
+                                 device="cuda")
+        print(tokenizer.decode(output))
+        break
         
         # 모델 저장 (epoch마다 저장)
         model_save_path = os.path.join(save_dir, f"llada/last_model.pt")
