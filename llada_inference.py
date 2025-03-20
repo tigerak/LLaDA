@@ -35,6 +35,7 @@ def llada_inference(cfg,
     
     for step_idx in range(num_step):
         with torch.no_grad():
+            torch.cuda.empty_cache() 
             logits, _ = model(input_ids=current_ids,
                               attention_mask=None,
                               labels=None,
@@ -78,4 +79,5 @@ def llada_inference(cfg,
                 current_ids.view(-1)[global_remask_ids] = mask_token_id
             
         else : # 마지막 strp
+            torch.cuda.empty_cache()
             return current_ids.squeeze(0).tolist()
